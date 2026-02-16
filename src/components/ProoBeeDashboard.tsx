@@ -101,7 +101,9 @@ export default function ProoBeeDashboard() {
     };
 
     const toggleAgentStatus = async (agentId: string, currentStatus: string) => {
-        const nextStatus = currentStatus === 'active' ? 'inactive' : 'active';
+        // DB의 Enum 값에 맞춰서 alive <-> dead 로 변경
+        const nextStatus = currentStatus === 'alive' ? 'dead' : 'alive';
+
         const { error } = await supabase.from('agents').update({ status: nextStatus }).eq('id', agentId);
         if (error) alert("Status update failed");
         else fetchData();
