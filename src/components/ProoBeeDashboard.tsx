@@ -8,7 +8,7 @@ import {
 
 type TimeFilter = '1h' | '1d' | '1w';
 type ChartType = 'line' | 'candle';
-type AIProvider = 'OpenAI' | 'Anthropic' | 'Google';
+type AIProvider = 'Google' | 'OpenAI' | 'Anthropic';
 
 export default function ProoBeeDashboard() {
     const [isLoginVisible, setIsLoginVisible] = useState(true);
@@ -21,7 +21,7 @@ export default function ProoBeeDashboard() {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [newAgentName, setNewAgentName] = useState('');
     const [newAgentPrompt, setNewAgentPrompt] = useState('');
-    const [selectedProvider, setSelectedProvider] = useState<AIProvider>('OpenAI');
+    const [selectedProvider, setSelectedProvider] = useState<AIProvider>('Google');
     const [apiKey, setApiKey] = useState('');
     const [chartType, setChartType] = useState<ChartType>('line');
     const [timeFilter, setTimeFilter] = useState('1d');
@@ -76,22 +76,20 @@ export default function ProoBeeDashboard() {
         e.preventDefault();
         if (!user) return alert("Authentication required.");
 
-        // 테이블 구조에 맞춰 agents 테이블에 직접 api_key를 넣거나 기존 방식을 유지해
-        // 여기서는 agents 테이블 컬럼에 api_key가 있으므로 직접 넣는 방식으로 변경함
         const { error: agentError } = await supabase.from('agents').insert([{
             name: newAgentName,
             persona: newAgentPrompt,
             provider: selectedProvider.toLowerCase(),
             user_id: user.id,
             yield: 0.0,
-            model: 'Selected',
+            model: selectedProvider === 'Google' ? 'gemini-1.5-pro' : 'Selected',
             api_key: apiKey,
-            status: 'active'
+            status: 'alive'
         }]);
 
         if (agentError) alert(agentError.message);
         else {
-            alert("New Bee Agent Hatched!");
+            alert(`${selectedProvider} Bee Agent Hatched!`);
             setIsCreateModalOpen(false);
             setNewAgentName('');
             setNewAgentPrompt('');
@@ -100,10 +98,8 @@ export default function ProoBeeDashboard() {
         }
     };
 
-    const toggleAgentStatus = async (agentId: string, currentStatus: string) => {
-        // DB의 Enum 값에 맞춰서 alive <-> dead 로 변경
+    const toggleAgentStatus = async (agentId: string, currentStatus: string | null) => {
         const nextStatus = currentStatus === 'alive' ? 'dead' : 'alive';
-
         const { error } = await supabase.from('agents').update({ status: nextStatus }).eq('id', agentId);
         if (error) alert("Status update failed");
         else fetchData();
@@ -151,12 +147,19 @@ export default function ProoBeeDashboard() {
                     <div className="bg-white w-full max-w-lg rounded-[2.5rem] border-4 border-[#1a1a1a] shadow-[8px_8px_0px_0px_#1a1a1a] overflow-hidden animate-in zoom-in-95 duration-200">
                         <div className="p-6 bg-[#FFD700] border-b-4 border-[#1a1a1a] flex justify-between items-center"><h3 className="text-xl font-black italic uppercase tracking-tighter flex items-center gap-2"><Plus size={20} strokeWidth={3} /> Hatch New Bee</h3><button onClick={() => setIsCreateModalOpen(false)} className="hover:rotate-90 transition-transform"><X size={24} strokeWidth={3} /></button></div>
                         <form onSubmit={handleCreateAgent} className="p-8 space-y-5 overflow-y-auto max-h-[80vh]">
-                            <div className="space-y-1"><label className="text-[10px] font-black uppercase tracking-widest ml-1">Bee Name</label><input value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)} placeholder="e.g. Honey Hunter" className="w-full px-5 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none focus:ring-4 focus:ring-[#FFD700]/20" required /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-black uppercase tracking-widest ml-1">Bee Name</label><input value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)} placeholder="e.g. My Trading Bee" className="w-full px-5 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none focus:ring-4 focus:ring-[#FFD700]/20" required /></div>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1"><label className="text-[10px] font-black uppercase tracking-widest ml-1">AI Provider</label><select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AIProvider)} className="w-full px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold bg-white outline-none cursor-pointer"><option>OpenAI</option><option>Anthropic</option><option>Google</option></select></div>
-                                <div className="space-y-1"><label className="text-[10px] font-black uppercase tracking-widest ml-1">Your API Key</label><div className="relative"><Key className="absolute left-4 top-1/2 -translate-y-1/2 w-3 h-3 opacity-30" /><input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="w-full pl-10 pr-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none focus:ring-4 focus:ring-[#FFD700]/20" required /></div></div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black uppercase tracking-widest ml-1">AI Provider</label>
+                                    <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AIProvider)} className="w-full px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold bg-white outline-none cursor-pointer">
+                                        <option value="Google">Google (Gemini)</option>
+                                        <option value="OpenAI">OpenAI (GPT)</option>
+                                        <option value="Anthropic">Anthropic (Claude)</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-1"><label className="text-[10px] font-black uppercase tracking-widest ml-1">API Key</label><div className="relative"><Key className="absolute left-4 top-1/2 -translate-y-1/2 w-3 h-3 opacity-30" /><input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Enter API Key" className="w-full pl-10 pr-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none focus:ring-4 focus:ring-[#FFD700]/20" required /></div></div>
                             </div>
-                            <div className="space-y-1"><div className="flex justify-between items-end mb-1"><label className="text-[10px] font-black uppercase tracking-widest ml-1">Behavior Prompt</label><span className="text-[9px] font-black text-red-500 flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded-full border border-red-500"><ShieldAlert size={10} /> Bee Law Applied</span></div><textarea value={newAgentPrompt} onChange={(e) => setNewAgentPrompt(e.target.value)} placeholder="Define strategy..." className="w-full h-32 px-5 py-4 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none resize-none bg-[#fdfcf0]" required /><div className="bg-[#1a1a1a] p-3 rounded-xl"><p className="text-[8px] font-bold text-white leading-tight">⚖️ <span className="text-[#FFD700]">Bee Law:</span> BTC/USDT only. Malicious use results in immediate isolation.</p></div></div>
+                            <div className="space-y-1"><div className="flex justify-between items-end mb-1"><label className="text-[10px] font-black uppercase tracking-widest ml-1">Behavior Prompt</label><span className="text-[9px] font-black text-red-500 flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded-full border border-red-500"><ShieldAlert size={10} /> Bee Law Applied</span></div><textarea value={newAgentPrompt} onChange={(e) => setNewAgentPrompt(e.target.value)} placeholder="How should this bee trade?" className="w-full h-32 px-5 py-4 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none resize-none bg-[#fdfcf0]" required /><div className="bg-[#1a1a1a] p-3 rounded-xl"><p className="text-[8px] font-bold text-white leading-tight">⚖️ <span className="text-[#FFD700]">Bee Law:</span> BTC/USDT only. Malicious use results in immediate isolation.</p></div></div>
                             <button type="submit" className="w-full py-4 bg-[#1a1a1a] text-white rounded-2xl font-black text-lg shadow-[4px_4px_0px_0px_#FFD700] active:translate-x-[2px] transition-all">HATCH AGENT</button>
                         </form>
                     </div>
@@ -173,18 +176,25 @@ export default function ProoBeeDashboard() {
                     {currentMode === 'overview' ? (
                         <div className="flex flex-col h-full gap-6">
                             <div className="grid grid-cols-3 gap-6 shrink-0">
-                                <div className="bg-white rounded-3xl border-2 border-[#1a1a1a] p-5 shadow-[4px_4px_0px_0px_#1a1a1a]"><span className="text-[#1a1a1a]/40 text-xs font-black uppercase flex items-center gap-2"><Users size={12} /> Active Agents</span><span className="text-4xl font-black tracking-tighter">{activeAgentsCount.toLocaleString()}</span></div>
+                                <div className="bg-white rounded-3xl border-2 border-[#1a1a1a] p-5 shadow-[4px_4px_0px_0px_#1a1a1a]"><span className="text-[#1a1a1a]/40 text-xs font-black uppercase flex items-center gap-2"><Users size={12} /> Active Agents</span><span className="text-4xl font-black tracking-tighter">{activeAgentsCount}</span></div>
                                 <div className="bg-white rounded-3xl border-2 border-[#1a1a1a] p-5 shadow-[4px_4px_0px_0px_#1a1a1a]"><span className="text-[#1a1a1a]/40 text-xs font-black uppercase flex items-center gap-2"><TrendingUp size={12} /> Avg Yield</span><span className={`text-4xl font-black tracking-tighter ${avgYield >= 0 ? 'text-green-500' : 'text-red-500'}`}>{avgYield >= 0 ? '+' : ''}{avgYield.toFixed(2)}%</span></div>
                                 <div className="bg-white rounded-3xl border-2 border-[#1a1a1a] p-5 shadow-[4px_4px_0px_0px_#1a1a1a]"><span className="text-[#1a1a1a]/40 text-xs font-black uppercase flex items-center gap-2"><Bitcoin size={12} className="text-[#FFD700]" /> BTC Price</span><span className="text-4xl font-black tracking-tighter">{btcPrice}</span></div>
                             </div>
+                            {/* 마켓 아레나 및 로그 섹션 (이전과 동일) */}
                             <div className="flex-1 flex gap-6 overflow-hidden">
                                 <div className="flex-[2] bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col overflow-hidden shadow-[4px_4px_0px_0px_#1a1a1a]">
                                     <div className="p-4 border-b-2 border-[#1a1a1a] flex justify-between items-center bg-[#fdfcf0]"><div className="flex gap-4 items-center"><h2 className="font-black text-sm uppercase flex items-center gap-2"><Activity size={16} className="text-[#FFD700]" /> Market Arena</h2><div className="flex border-2 border-[#1a1a1a] rounded-lg overflow-hidden"><button onClick={() => setChartType('line')} className={`p-1.5 ${chartType === 'line' ? 'bg-[#FFD700]' : 'bg-white'} border-r-2 border-[#1a1a1a]`}><LineIcon size={16} /></button><button onClick={() => setChartType('candle')} className={`p-1.5 ${chartType === 'candle' ? 'bg-[#FFD700]' : 'bg-white'}`}><CandlestickIcon size={16} /></button></div></div><div className="flex gap-2">{(['1h', '1d', '1w'] as TimeFilter[]).map(f => (<button key={f} onClick={() => setTimeFilter(f)} className={`px-3 py-1 rounded-lg border-2 border-[#1a1a1a] text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_#1a1a1a] ${timeFilter === f ? 'bg-[#FFD700]' : 'bg-white'}`}>{f}</button>))}</div></div>
-                                    <div className="flex-1 relative bg-white flex items-center justify-center p-4 pt-10"><svg className="w-full h-full overflow-visible" viewBox="0 0 1000 300" preserveAspectRatio="none">{chartMetrics && [0, 0.5, 1].map(v => (<text key={v} x="75" y={300 - 40 - v * 220} textAnchor="end" className="text-[20px] font-black opacity-20 fill-black italic">${(chartMetrics.min + v * chartMetrics.range).toLocaleString(undefined, { maximumFractionDigits: 0 })}</text>))}{marketData.length > 0 && [0, Math.floor(marketData.length / 2), marketData.length - 1].map(idx => (<text key={idx} x={getX(idx)} y="295" textAnchor="middle" className="text-[20px] font-black opacity-20 fill-black italic">{new Date(marketData[idx][0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</text>))}{chartType === 'line' ? (<path d={marketData.length > 0 ? `M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}` : ''} fill="none" stroke="#1a1a1a" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />) : (marketData.map((d, i) => { const open = parseFloat(d[1]), high = parseFloat(d[2]), low = parseFloat(d[3]), close = parseFloat(d[4]), isUp = close >= open, x = getX(i), cw = (800 / marketData.length) * 0.6; return (<g key={i}><line x1={x} y1={getY(high)} x2={x} y2={getY(low)} stroke="#1a1a1a" strokeWidth="2" /><rect x={x - cw / 2} y={getY(isUp ? close : open)} width={cw} height={Math.max(2, Math.abs(getY(close) - getY(open)))} fill={isUp ? '#22c55e' : '#ef4444'} stroke="#1a1a1a" strokeWidth="2" rx="2" /></g>); }))}</svg></div>
+                                    <div className="flex-1 relative bg-white flex items-center justify-center p-4 pt-10">
+                                        <svg className="w-full h-full overflow-visible" viewBox="0 0 1000 300" preserveAspectRatio="none">
+                                            {chartMetrics && [0, 0.5, 1].map(v => (<text key={v} x="75" y={300 - 40 - v * 220} textAnchor="end" className="text-[20px] font-black opacity-20 fill-black italic">${(chartMetrics.min + v * chartMetrics.range).toLocaleString(undefined, { maximumFractionDigits: 0 })}</text>))}
+                                            {marketData.length > 0 && [0, Math.floor(marketData.length / 2), marketData.length - 1].map(idx => (<text key={idx} x={getX(idx)} y="295" textAnchor="middle" className="text-[20px] font-black opacity-20 fill-black italic">{new Date(marketData[idx][0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</text>))}
+                                            {chartType === 'line' ? (<path d={marketData.length > 0 ? `M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}` : ''} fill="none" stroke="#1a1a1a" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />) : (marketData.map((d, i) => { const open = parseFloat(d[1]), high = parseFloat(d[2]), low = parseFloat(d[3]), close = parseFloat(d[4]), isUp = close >= open, x = getX(i), cw = (800 / marketData.length) * 0.6; return (<g key={i}><line x1={x} y1={getY(high)} x2={x} y2={getY(low)} stroke="#1a1a1a" strokeWidth="2" /><rect x={x - cw / 2} y={getY(isUp ? close : open)} width={cw} height={Math.max(2, Math.abs(getY(close) - getY(open)))} fill={isUp ? '#22c55e' : '#ef4444'} stroke="#1a1a1a" strokeWidth="2" rx="2" /></g>); }))}
+                                        </svg>
+                                    </div>
                                 </div>
                                 <div className="flex-1 flex flex-col gap-6">
                                     <div className="flex-1 bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col overflow-hidden shadow-[4px_4px_0px_0px_#1a1a1a]"><div className="p-3 bg-[#FFD700] border-b-2 border-[#1a1a1a] font-black text-xs uppercase flex items-center gap-2"><Radio size={12} /> Live Reasoning</div><div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#fdfcf0]">{reasoningLogs.length > 0 ? reasoningLogs.map((log, idx) => (<div key={idx} className="bg-white p-3 rounded-2xl border-2 border-[#1a1a1a] shadow-[2px_2px_0px_0px_#1a1a1a]"><p className="text-[11px] font-bold italic leading-tight">"{log.content}"</p><p className="text-[8px] mt-1 opacity-40 text-right">{new Date(log.created_at).toLocaleTimeString()}</p></div>)) : <p className="text-[11px] opacity-40 italic text-center py-10">Waiting for bee thoughts...</p>}</div></div>
-                                    <div className="h-48 bg-white rounded-3xl border-2 border-[#1a1a1a] overflow-hidden shadow-[4px_4px_0px_0px_#1a1a1a]"><div className="p-3 bg-[#FFD700] border-b-2 border-[#1a1a1a] font-black text-xs uppercase flex justify-between items-center"><span><Trophy size={12} className="inline mr-1" /> Agent Ranking</span></div><div className="overflow-y-auto h-full"><table className="w-full text-left text-[11px] font-bold"><tbody>{[...myAgents].sort((a, b) => b.yield - a.yield).slice(0, 5).map((r, i) => (<tr key={i} className="border-b border-[#1a1a1a]/5 hover:bg-[#FFD700]/5 transition-colors"><td className="p-3 italic">{i + 1}. {r.name}</td><td className="p-3 text-right text-green-600">+{r.yield}%</td></tr>))}</tbody></table></div></div>
+                                    <div className="h-48 bg-white rounded-3xl border-2 border-[#1a1a1a] overflow-hidden shadow-[4px_4px_0px_0px_#1a1a1a]"><div className="p-3 bg-[#FFD700] border-b-2 border-[#1a1a1a] font-black text-xs uppercase flex justify-between items-center"><span><Trophy size={12} className="inline mr-1" /> Top Yields</span></div><div className="overflow-y-auto h-full"><table className="w-full text-left text-[11px] font-bold"><tbody>{[...myAgents].sort((a, b) => b.yield - a.yield).slice(0, 5).map((r, i) => (<tr key={i} className="border-b border-[#1a1a1a]/5 hover:bg-[#FFD700]/5 transition-colors"><td className="p-3 italic">{i + 1}. {r.name}</td><td className="p-3 text-right text-green-600">+{r.yield}%</td></tr>))}</tbody></table></div></div>
                                 </div>
                             </div>
                         </div>
@@ -199,9 +209,9 @@ export default function ProoBeeDashboard() {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl pb-10">
                                 {myAgents.map((agent) => (
-                                    <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${agent.status !== 'active' ? 'opacity-60 grayscale' : ''}`}>
+                                    <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${agent.status !== 'alive' ? 'opacity-60 grayscale' : ''}`}>
                                         <div className="flex items-center gap-4">
-                                            <div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'active' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}>
+                                            <div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'alive' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}>
                                                 <Bot size={20} />
                                             </div>
                                             <div>
@@ -211,10 +221,10 @@ export default function ProoBeeDashboard() {
                                         </div>
                                         <button
                                             onClick={() => toggleAgentStatus(agent.id, agent.status)}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] transition-all active:translate-x-[1px] active:translate-y-[1px] ${agent.status === 'active' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] transition-all active:translate-x-[1px] active:translate-y-[1px] ${agent.status === 'alive' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}
                                         >
                                             <Power size={12} strokeWidth={3} />
-                                            {agent.status === 'active' ? 'Stop' : 'Start'}
+                                            {agent.status === 'alive' ? 'Stop' : 'Start'}
                                         </button>
                                     </div>
                                 ))}
