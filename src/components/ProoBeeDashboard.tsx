@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import {
-    Hexagon, Bot, User, Users, TrendingUp, Bitcoin, Activity, Radio, Trophy,
+    Hexagon, Bot, Users, TrendingUp, Bitcoin, Activity, Radio, Trophy,
     ArrowLeft, Mail, Lock, LogOut, BarChart3 as CandlestickIcon, LineChart as LineIcon, Plus, X, ShieldAlert, Key, Power
 } from 'lucide-react';
 
@@ -38,22 +38,19 @@ export default function ProoBeeDashboard() {
         else if (timeFilter === '1w') { interval = '1d'; limit = '7'; }
 
         try {
-            // 마켓 데이터 페치
             const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`);
             const data = await res.json();
             setMarketData(data);
             setBtcPrice(`$${parseFloat(data[data.length - 1][4]).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
 
-            // 에이전트 데이터 페치
             const { data: agentData } = await supabase.from('agents').select('*').order('created_at', { ascending: false });
             if (agentData) {
                 setMyAgents(agentData);
-                setActiveAgentsCount(agentData.filter(a => a.is_active).length);
+                setActiveAgentsCount(agentData.filter(a => a.status === 'active').length);
                 const total = agentData.reduce((acc, curr) => acc + (curr.yield || 0), 0);
                 setAvgYield(agentData.length > 0 ? total / agentData.length : 0);
             }
 
-            // 추론 로그 페치
             const { data: logs } = await supabase.from('reasoning_logs').select('*').order('created_at', { ascending: false }).limit(5);
             setReasoningLogs(logs || []);
         } catch (e) { console.error("Fetch Error:", e); }
@@ -78,8 +75,9 @@ export default function ProoBeeDashboard() {
     const handleCreateAgent = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return alert("Authentication required.");
-        const { error: keyError } = await supabase.from('user_api_keys').upsert({ user_id: user.id, provider: selectedProvider.toLowerCase(), api_key: apiKey });
-        if (keyError) return alert("Failed to save API Key: " + keyError.message);
+
+        // 테이블 구조에 맞춰 agents 테이블에 직접 api_key를 넣거나 기존 방식을 유지해
+        // 여기서는 agents 테이블 컬럼에 api_key가 있으므로 직접 넣는 방식으로 변경함
         const { error: agentError } = await supabase.from('agents').insert([{
             name: newAgentName,
             persona: newAgentPrompt,
@@ -87,8 +85,10 @@ export default function ProoBeeDashboard() {
             user_id: user.id,
             yield: 0.0,
             model: 'Selected',
-            is_active: true
+            api_key: apiKey,
+            status: 'active'
         }]);
+
         if (agentError) alert(agentError.message);
         else {
             alert("New Bee Agent Hatched!");
@@ -100,9 +100,9 @@ export default function ProoBeeDashboard() {
         }
     };
 
-    // 상태 토글 함수
-    const toggleAgentStatus = async (agentId: string, currentStatus: boolean) => {
-        const { error } = await supabase.from('agents').update({ is_active: !currentStatus }).eq('id', agentId);
+    const toggleAgentStatus = async (agentId: string, currentStatus: string) => {
+        const nextStatus = currentStatus === 'active' ? 'inactive' : 'active';
+        const { error } = await supabase.from('agents').update({ status: nextStatus }).eq('id', agentId);
         if (error) alert("Status update failed");
         else fetchData();
     };
@@ -197,9 +197,9 @@ export default function ProoBeeDashboard() {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl pb-10">
                                 {myAgents.map((agent) => (
-                                    <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${!agent.is_active ? 'opacity-60 grayscale' : ''}`}>
+                                    <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${agent.status !== 'active' ? 'opacity-60 grayscale' : ''}`}>
                                         <div className="flex items-center gap-4">
-                                            <div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.is_active ? 'bg-[#FFD700]' : 'bg-gray-200'}`}>
+                                            <div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'active' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}>
                                                 <Bot size={20} />
                                             </div>
                                             <div>
@@ -208,11 +208,11 @@ export default function ProoBeeDashboard() {
                                             </div>
                                         </div>
                                         <button
-                                            onClick={() => toggleAgentStatus(agent.id, agent.is_active)}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] transition-all active:translate-x-[1px] active:translate-y-[1px] ${agent.is_active ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}
+                                            onClick={() => toggleAgentStatus(agent.id, agent.status)}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] transition-all active:translate-x-[1px] active:translate-y-[1px] ${agent.status === 'active' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}
                                         >
                                             <Power size={12} strokeWidth={3} />
-                                            {agent.is_active ? 'Stop' : 'Start'}
+                                            {agent.status === 'active' ? 'Stop' : 'Start'}
                                         </button>
                                     </div>
                                 ))}
