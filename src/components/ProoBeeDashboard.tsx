@@ -46,7 +46,7 @@ export default function ProoBeeDashboard() {
             const { data: agentData } = await supabase.from('agents').select('*').order('created_at', { ascending: false });
             if (agentData) {
                 setMyAgents(agentData);
-                setActiveAgentsCount(agentData.filter(a => a.status === 'active').length);
+                setActiveAgentsCount(agentData.filter(a => a.status === 'alive').length);
                 const total = agentData.reduce((acc, curr) => acc + (curr.yield || 0), 0);
                 setAvgYield(agentData.length > 0 ? total / agentData.length : 0);
             }
