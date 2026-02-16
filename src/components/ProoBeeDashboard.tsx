@@ -57,6 +57,7 @@ export default function ProoBeeDashboard() {
         } catch (e) { console.error("Fetch Error:", e); }
     };
 
+    // 데이터 패칭 타이머 분리
     useEffect(() => {
         const init = async () => {
             const { data: { session } } = await supabase.auth.getSession();
@@ -65,39 +66,55 @@ export default function ProoBeeDashboard() {
             fetchData();
         };
         init();
+
         const interval = setInterval(fetchData, 15000);
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => {
             if (s) { setUser(s.user); setIsLoginVisible(false); }
             else { setUser(null); setIsLoginVisible(true); }
         });
-        return () => { subscription.unsubscribe(); clearInterval(interval); };
+
+        return () => {
+            subscription.unsubscribe();
+            clearInterval(interval);
+        };
     }, [timeFilter]);
 
-    // 모의 트레이딩 및 AI 분석 실행
-    const handleRunSimulation = async () => {
+    // 자동 시뮬레이션 타이머 분리
+    useEffect(() => {
+        if (!user) return;
+        const simInterval = setInterval(() => {
+            if (myAgents.some(a => a.status === 'alive') && !isSimulating) {
+                handleRunSimulation(true); // 자동 실행임을 알림
+            }
+        }, 60000);
+        return () => clearInterval(simInterval);
+    }, [myAgents, user, isSimulating]);
+
+    const handleRunSimulation = async (isAuto = false) => {
         const aliveBees = myAgents.filter(a => a.status === 'alive');
-        if (aliveBees.length === 0) return alert("활성화된 에이전트가 없습니다.");
+        if (aliveBees.length === 0) {
+            if (!isAuto) alert("활성화된 에이전트가 없습니다.");
+            return;
+        }
 
         setIsSimulating(true);
-        const currentPrice = parseFloat(marketData[marketData.length - 1][4]);
+        const currentPrice = marketData.length > 0 ? parseFloat(marketData[marketData.length - 1][4]) : 0;
 
         for (const agent of aliveBees) {
             try {
-                // 테스트용 로직 (실제 서비스시 Gemini SDK 연동 부분)
                 const mockDecisions = ['BUY', 'SELL', 'HOLD'];
                 const decision = mockDecisions[Math.floor(Math.random() * mockDecisions.length)];
-                const mockReasoning = `${agent.name}가 현재 가격 $${currentPrice}에서 시장을 분석하여 ${decision} 결정을 내렸습니다.`;
+                const mockReasoning = `${agent.name}가 현재 가격 $${currentPrice.toLocaleString()}에서 시장을 분석하여 ${decision} 결정을 내렸습니다.`;
 
-                // 1. 분석 로그 기록
                 await supabase.from('reasoning_logs').insert([{
                     content: mockReasoning,
                     agent_id: agent.id
                 }]);
 
-                // 2. 모의 트레이딩 결과 반영 (수익률 랜덤 변동)
-                const yieldChange = decision === 'BUY' ? 0.2 : (decision === 'SELL' ? -0.1 : 0);
+                const yieldChange = decision === 'BUY' ? 0.2 : (decision === 'SELL' ? -0.1 : 0.01);
                 await supabase.from('agents').update({
-                    yield: agent.yield + yieldChange
+                    yield: (agent.yield || 0) + yieldChange
                 }).eq('id', agent.id);
 
             } catch (err) {
@@ -107,7 +124,7 @@ export default function ProoBeeDashboard() {
 
         await fetchData();
         setIsSimulating(false);
-        alert("시뮬레이션이 완료되었습니다. 로그와 수익률을 확인하세요.");
+        if (!isAuto) alert("시뮬레이션 완료!");
     };
 
     const handleCreateAgent = async (e: React.FormEvent) => {
@@ -192,13 +209,30 @@ export default function ProoBeeDashboard() {
             )}
 
             <header className="h-20 bg-white border-b-4 border-[#1a1a1a] flex items-center justify-between px-8 shrink-0">
-                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentMode('overview')}><div className="w-10 h-10 bg-[#1a1a1a] text-[#FFD700] rounded-full border-2 border-[#1a1a1a] flex items-center justify-center shadow-[2px_2px_0px_0px_#1a1a1a]"><Hexagon className="w-6 h-6 fill-current" /></div><span className="text-2xl font-black italic tracking-tighter">PROO BEE</span></div>
+                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentMode('overview')}>
+                    <div className="w-10 h-10 bg-[#1a1a1a] text-[#FFD700] rounded-full border-2 border-[#1a1a1a] flex items-center justify-center shadow-[2px_2px_0px_0px_#1a1a1a]">
+                        <Hexagon className="w-6 h-6 fill-current" />
+                    </div>
+                    <span className="text-2xl font-black italic tracking-tighter">PROO BEE</span>
+                </div>
+
                 <div className="flex items-center gap-4">
-                    <button onClick={handleRunSimulation} disabled={isSimulating} className="px-6 py-2 bg-[#1a1a1a] text-[#FFD700] rounded-xl font-black text-sm shadow-[4px_4px_0px_0px_#FFD700] flex items-center gap-2 active:translate-y-1 transition-all">
-                        <Play size={16} fill="currentColor" /> {isSimulating ? 'ANALYZING...' : 'RUN SIMULATION'}
+                    <button
+                        onClick={() => handleRunSimulation(false)}
+                        disabled={isSimulating}
+                        className="px-6 py-2 bg-[#1a1a1a] text-[#FFD700] rounded-xl font-black text-sm shadow-[4px_4px_0px_0px_#FFD700] flex items-center gap-2 active:translate-y-1 transition-all disabled:opacity-50"
+                    >
+                        <Play size={16} fill="currentColor" />
+                        {isSimulating ? 'ANALYZING...' : 'RUN SIMULATION'}
                     </button>
-                    <button onClick={() => setCurrentMode(currentMode === 'overview' ? 'agent-detail' : 'overview')} className="px-6 py-2 rounded-xl border-2 border-[#1a1a1a] font-black shadow-[4px_4px_0px_0px_#1a1a1a] flex items-center gap-2 bg-[#FFD700]"><Bot size={18} /><span className="text-sm uppercase">{currentMode === 'overview' ? 'My Agent' : 'Back'}</span></button>
-                    <div onClick={handleLogout} className="w-10 h-10 rounded-full bg-white border-2 border-[#1a1a1a] flex items-center justify-center cursor-pointer shadow-[2px_2px_0px_0px_#1a1a1a]"><LogOut size={18} /></div>
+
+                    <button onClick={() => setCurrentMode(currentMode === 'overview' ? 'agent-detail' : 'overview')} className="px-6 py-2 rounded-xl border-2 border-[#1a1a1a] font-black shadow-[4px_4px_0px_0px_#1a1a1a] flex items-center gap-2 bg-[#FFD700]">
+                        <Bot size={18} />
+                        <span className="text-sm uppercase">{currentMode === 'overview' ? 'My Agent' : 'Back'}</span>
+                    </button>
+                    <div onClick={handleLogout} className="w-10 h-10 rounded-full bg-white border-2 border-[#1a1a1a] flex items-center justify-center cursor-pointer shadow-[2px_2px_0px_0px_#1a1a1a]">
+                        <LogOut size={18} />
+                    </div>
                 </div>
             </header>
 
@@ -213,12 +247,22 @@ export default function ProoBeeDashboard() {
                         <div className="flex-1 flex gap-6 overflow-hidden">
                             <div className="flex-[2] bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col shadow-[4px_4px_0px_0px_#1a1a1a]">
                                 <div className="p-4 border-b-2 border-[#1a1a1a] flex justify-between bg-[#fdfcf0] font-black uppercase text-xs"><span>Market Arena</span><div className="flex gap-2">{(['1h', '1d', '1w'] as TimeFilter[]).map(f => (<button key={f} onClick={() => setTimeFilter(f)} className={`px-2 rounded border-2 border-[#1a1a1a] ${timeFilter === f ? 'bg-[#FFD700]' : 'bg-white'}`}>{f}</button>))}</div></div>
-                                <div className="flex-1 p-4"><svg className="w-full h-full overflow-visible" viewBox="0 0 1000 300" preserveAspectRatio="none">{chartMetrics && [0, 0.5, 1].map(v => (<text key={v} x="75" y={300 - 40 - v * 220} textAnchor="end" className="text-[20px] font-black opacity-10 fill-black italic">${(chartMetrics.min + v * chartMetrics.range).toLocaleString()}</text>))}{chartType === 'line' && (<path d={marketData.length > 0 ? `M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}` : ''} fill="none" stroke="#1a1a1a" strokeWidth="5" />)}</svg></div>
+                                <div className="flex-1 p-4">
+                                    <svg className="w-full h-full overflow-visible" viewBox="0 0 1000 300" preserveAspectRatio="none">
+                                        {chartMetrics && [0, 0.5, 1].map(v => (<text key={v} x="75" y={300 - 40 - v * 220} textAnchor="end" className="text-[20px] font-black opacity-10 fill-black italic">${(chartMetrics.min + v * chartMetrics.range).toLocaleString()}</text>))}
+                                        {marketData.length > 0 && [0, Math.floor(marketData.length / 2), marketData.length - 1].map(idx => (<text key={idx} x={getX(idx)} y="295" textAnchor="middle" className="text-[20px] font-black opacity-20 fill-black italic">{new Date(marketData[idx][0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</text>))}
+                                        {chartType === 'line' && (<path d={marketData.length > 0 ? `M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}` : ''} fill="none" stroke="#1a1a1a" strokeWidth="5" />)}
+                                    </svg>
+                                </div>
                             </div>
                             <div className="flex-1 flex flex-col gap-6">
                                 <div className="flex-1 bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col shadow-[4px_4px_0px_0px_#1a1a1a] overflow-hidden">
                                     <div className="p-3 bg-[#FFD700] border-b-2 border-[#1a1a1a] font-black text-xs uppercase flex items-center gap-2"><Radio size={12} /> Live Reasoning</div>
-                                    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#fdfcf0]">{reasoningLogs.map((log, i) => (<div key={i} className="bg-white p-3 rounded-xl border-2 border-[#1a1a1a] shadow-[2px_2px_0px_0px_#1a1a1a] text-[10px] font-bold italic leading-tight">"{log.content}"</div>))}</div>
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#fdfcf0]">
+                                        {reasoningLogs.length > 0 ? reasoningLogs.map((log, i) => (
+                                            <div key={i} className="bg-white p-3 rounded-xl border-2 border-[#1a1a1a] shadow-[2px_2px_0px_0px_#1a1a1a] text-[10px] font-bold italic leading-tight">"{log.content}"</div>
+                                        )) : <div className="text-[10px] font-bold opacity-30 text-center py-10">Waiting for bee thoughts...</div>}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -233,7 +277,7 @@ export default function ProoBeeDashboard() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl pb-10">
                             {myAgents.map((agent) => (
                                 <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center ${agent.status !== 'alive' ? 'opacity-50 grayscale' : ''}`}>
-                                    <div><h3 className="font-black text-lg italic">{agent.name}</h3><p className="text-[10px] font-black opacity-40 uppercase">{agent.provider} • Yield: {agent.yield.toFixed(2)}%</p></div>
+                                    <div><h3 className="font-black text-lg italic">{agent.name}</h3><p className="text-[10px] font-black opacity-40 uppercase">{agent.provider} • Yield: {agent.yield?.toFixed(2) || '0.00'}%</p></div>
                                     <button onClick={() => toggleAgentStatus(agent.id, agent.status)} className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] ${agent.status === 'alive' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}><Power size={12} />{agent.status === 'alive' ? 'Stop' : 'Start'}</button>
                                 </div>
                             ))}
