@@ -1,10 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import {
-    Hexagon, Bot, Users, TrendingUp, Bitcoin, Activity, Radio, Trophy,
-    ArrowLeft, Mail, Lock, LogOut, BarChart3 as CandlestickIcon, LineChart as LineIcon, Plus, X, ShieldAlert, Key, Power, Play
-} from 'lucide-react';
+import { Hexagon, Bot, Users, TrendingUp, Bitcoin, Activity, Radio, Trophy, ArrowLeft, Mail, Lock, LogOut, BarChart3 as CandlestickIcon, LineChart as LineIcon, Plus, X, ShieldAlert, Key, Power, Play } from 'lucide-react';
 
 type TimeFilter = '1h' | '1d' | '1w';
 type ChartType = 'line' | 'candle';
@@ -24,7 +21,7 @@ export default function ProoBeeDashboard() {
     const [newAgentPrompt, setNewAgentPrompt] = useState('');
     const [selectedProvider, setSelectedProvider] = useState<AIProvider>('Google');
     const [apiKey, setApiKey] = useState('');
-    const [chartType, setChartType] = useState<ChartType>('candle'); // Default to candle
+    const [chartType, setChartType] = useState<ChartType>('candle');
     const [timeFilter, setTimeFilter] = useState<TimeFilter>('1d');
     const [marketData, setMarketData] = useState<any[]>([]);
     const [btcPrice, setBtcPrice] = useState<string>('Loading...');
@@ -32,27 +29,25 @@ export default function ProoBeeDashboard() {
     const [avgYield, setAvgYield] = useState<number>(0);
     const [reasoningLogs, setReasoningLogs] = useState<any[]>([]);
     const [myAgents, setMyAgents] = useState<any[]>([]);
+    // 마우스 호버 상태 추가
+    const [hoverInfo, setHoverInfo] = useState<{ x: number, y: number, price: string, time: string, idx: number } | null>(null);
 
     const fetchData = async () => {
         let interval = '1h', limit = '40';
         if (timeFilter === '1h') { interval = '1m'; limit = '60'; }
         else if (timeFilter === '1w') { interval = '1d'; limit = '30'; }
-
         try {
             const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`);
             const data = await res.json();
             setMarketData(data);
             setBtcPrice(`$${parseFloat(data[data.length - 1][4]).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
-
             const { data: agentData } = await supabase.from('agents').select('*').order('created_at', { ascending: false });
             if (agentData) {
                 setMyAgents(agentData);
                 setActiveAgentsCount(agentData.filter(a => a.status === 'alive').length);
-                const total = agentData.reduce((acc, curr) => acc + (curr.yield || 0), 0);
-                setAvgYield(agentData.length > 0 ? total / agentData.length : 0);
+                setAvgYield(agentData.length > 0 ? agentData.reduce((acc, curr) => acc + (curr.yield || 0), 0) / agentData.length : 0);
             }
-
-            const { data: logs } = await supabase.from('reasoning_logs').select('*').order('created_at', { ascending: false }).limit(5);
+            const { data: logs } = await supabase.from('reasoning_logs').select('*').order('created_at', { ascending: false }).limit(20);
             setReasoningLogs(logs || []);
         } catch (e) { console.error("Fetch Error:", e); }
     };
@@ -61,8 +56,7 @@ export default function ProoBeeDashboard() {
         const init = async () => {
             const { data: { session } } = await supabase.auth.getSession();
             if (session) { setUser(session.user); setIsLoginVisible(false); }
-            setLoading(false);
-            fetchData();
+            setLoading(false); fetchData();
         };
         init();
         const interval = setInterval(fetchData, 10000);
@@ -128,7 +122,18 @@ export default function ProoBeeDashboard() {
     }, [marketData]);
 
     const getY = (p: number) => chartMetrics ? 260 - ((p - chartMetrics.min) / chartMetrics.range) * 220 : 0;
-    const getX = (i: number) => 20 + (i / (marketData.length - 1)) * 880;
+    const getX = (i: number) => 40 + (i / (marketData.length - 1)) * 820;
+
+    // 마우스 이벤트 핸들러
+    const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+        if (!chartMetrics || marketData.length === 0) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const mouseX = ((e.clientX - rect.left) / rect.width) * 900;
+        const idx = Math.min(Math.max(0, Math.round(((mouseX - 40) / 820) * (marketData.length - 1))), marketData.length - 1);
+        const price = parseFloat(marketData[idx][4]);
+        const time = new Date(marketData[idx][0]).toLocaleString();
+        setHoverInfo({ x: getX(idx), y: getY(price), price: price.toLocaleString(), time, idx });
+    };
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -190,45 +195,55 @@ export default function ProoBeeDashboard() {
                         <div className="flex-1 flex gap-6 overflow-hidden">
                             <div className="flex-[2.5] bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col shadow-[4px_4px_0px_0px_#1a1a1a] overflow-hidden">
                                 <div className="p-4 border-b-2 border-[#1a1a1a] flex justify-between bg-[#fdfcf0] font-black uppercase text-[10px] tracking-widest">
-                                    <div className="flex items-center gap-4">
-                                        <span>Market Arena (BTC/USDT)</span>
-                                        <div className="flex border-2 border-[#1a1a1a] rounded overflow-hidden">
-                                            <button onClick={() => setChartType('line')} className={`p-1 ${chartType === 'line' ? 'bg-[#FFD700]' : 'bg-white'}`}><LineIcon size={12} /></button>
-                                            <button onClick={() => setChartType('candle')} className={`p-1 ${chartType === 'candle' ? 'bg-[#FFD700]' : 'bg-white'}`}><CandlestickIcon size={12} /></button>
-                                        </div>
-                                    </div>
+                                    <div className="flex items-center gap-4"><span>Market Arena (BTC/USDT)</span><div className="flex border-2 border-[#1a1a1a] rounded overflow-hidden"><button onClick={() => setChartType('line')} className={`p-1 ${chartType === 'line' ? 'bg-[#FFD700]' : 'bg-white'}`}><LineIcon size={12} /></button><button onClick={() => setChartType('candle')} className={`p-1 ${chartType === 'candle' ? 'bg-[#FFD700]' : 'bg-white'}`}><CandlestickIcon size={12} /></button></div></div>
                                     <div className="flex gap-2">{(['1h', '1d', '1w'] as TimeFilter[]).map(f => (<button key={f} onClick={() => setTimeFilter(f)} className={`px-2 py-0.5 rounded border-2 border-[#1a1a1a] ${timeFilter === f ? 'bg-[#FFD700]' : 'bg-white'}`}>{f}</button>))}</div>
                                 </div>
-                                {/* BINANCE STYLE CHART AREA */}
-                                <div className="flex-1 bg-[#121212] relative flex overflow-hidden">
+                                <div className="flex-1 bg-[#121212] relative flex overflow-hidden cursor-crosshair">
                                     <div className="flex-1 relative">
-                                        <svg className="w-full h-full" viewBox="0 0 900 300" preserveAspectRatio="none">
+                                        <svg className="w-full h-full" viewBox="0 0 900 300" preserveAspectRatio="none" onMouseMove={handleMouseMove} onMouseLeave={() => setHoverInfo(null)}>
                                             {/* Grid Lines */}
                                             {[0, 0.25, 0.5, 0.75, 1].map(v => (<line key={v} x1="0" y1={40 + v * 220} x2="900" y2={40 + v * 220} stroke="#2a2a2a" strokeWidth="1" strokeDasharray="4" />))}
+                                            {/* X-axis time labels */}
+                                            {marketData.length > 0 && [0, Math.floor(marketData.length / 2), marketData.length - 1].map(i => (<text key={i} x={getX(i)} y="295" className="text-[12px] fill-[#848e9c] font-bold" textAnchor="middle">{new Date(marketData[i][0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>))}
                                             {/* Chart Rendering */}
                                             {chartMetrics && marketData.length > 0 && (
-                                                chartType === 'line' ? (
-                                                    <path d={`M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}`} fill="none" stroke="#FFD700" strokeWidth="2" strokeLinecap="round" />
-                                                ) : (
+                                                chartType === 'line' ? (<path d={`M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}`} fill="none" stroke="#FFD700" strokeWidth="2" strokeLinecap="round" />) :
                                                     marketData.map((d, i) => {
                                                         const o = parseFloat(d[1]), h = parseFloat(d[2]), l = parseFloat(d[3]), c = parseFloat(d[4]);
-                                                        const isUp = c >= o, x = getX(i), cw = (700 / marketData.length) * 0.4;
-                                                        return (
-                                                            <g key={i}>
-                                                                <line x1={x} y1={getY(h)} x2={x} y2={getY(l)} stroke={isUp ? '#2ebd85' : '#f6465d'} strokeWidth="1.5" />
-                                                                <rect x={x - cw / 2} y={getY(isUp ? c : o)} width={cw} height={Math.max(1, Math.abs(getY(c) - getY(o)))} fill={isUp ? '#2ebd85' : '#f6465d'} rx="1" />
-                                                            </g>
-                                                        );
+                                                        const isUp = c >= o, x = getX(i), cw = (800 / marketData.length) * 0.4;
+                                                        return (<g key={i}><line x1={x} y1={getY(h)} x2={x} y2={getY(l)} stroke={isUp ? '#2ebd85' : '#f6465d'} strokeWidth="1.5" /><rect x={x - cw / 2} y={getY(isUp ? c : o)} width={cw} height={Math.max(1, Math.abs(getY(c) - getY(o)))} fill={isUp ? '#2ebd85' : '#f6465d'} rx="1" /></g>);
                                                     })
-                                                )
+                                            )}
+                                            {/* Agent Buy/Sell Markers (based on Reasoning Logs) */}
+                                            {reasoningLogs.map((log, i) => {
+                                                const logTime = new Date(log.created_at).getTime();
+                                                const dataIdx = marketData.findIndex(d => Math.abs(d[0] - logTime) < 3600000); // 1시간 이내 오차 매칭
+                                                if (dataIdx === -1) return null;
+                                                const isBuy = log.content.includes('BUY');
+                                                const isSell = log.content.includes('SELL');
+                                                if (!isBuy && !isSell) return null;
+                                                return (
+                                                    <g key={i}>
+                                                        <circle cx={getX(dataIdx)} cy={getY(parseFloat(marketData[dataIdx][4]))} r="6" fill={isBuy ? '#2ebd85' : '#f6465d'} stroke="white" strokeWidth="2" />
+                                                        <text x={getX(dataIdx)} y={getY(parseFloat(marketData[dataIdx][4])) + (isBuy ? 20 : -15)} textAnchor="middle" className={`text-[10px] font-black ${isBuy ? 'fill-[#2ebd85]' : 'fill-[#f6465d]'}`}>{isBuy ? '▲ BUY' : '▼ SELL'}</text>
+                                                    </g>
+                                                );
+                                            })}
+                                            {/* Crosshair & Tooltip */}
+                                            {hoverInfo && (
+                                                <g>
+                                                    <line x1="0" y1={hoverInfo.y} x2="900" y2={hoverInfo.y} stroke="white" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
+                                                    <line x1={hoverInfo.x} y1="0" x2={hoverInfo.x} y2="300" stroke="white" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
+                                                    <rect x="830" y={hoverInfo.y - 10} width="70" height="20" fill="#FFD700" rx="4" />
+                                                    <text x="865" y={hoverInfo.y + 4} textAnchor="middle" className="text-[10px] fill-[#1a1a1a] font-black">${hoverInfo.price.split('.')[0]}</text>
+                                                    <rect x={hoverInfo.x - 40} y="275" width="80" height="20" fill="#FFD700" rx="4" />
+                                                    <text x={hoverInfo.x} y="289" textAnchor="middle" className="text-[10px] fill-[#1a1a1a] font-black">{new Date(marketData[hoverInfo.idx][0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>
+                                                </g>
                                             )}
                                         </svg>
                                     </div>
-                                    {/* Price Axis (Right side) */}
-                                    <div className="w-20 border-l border-[#2a2a2a] bg-[#121212] flex flex-col justify-between py-10 px-2">
-                                        {chartMetrics && [1, 0.75, 0.5, 0.25, 0].map(v => (
-                                            <span key={v} className="text-[10px] font-bold text-[#848e9c]">{(chartMetrics.min + v * chartMetrics.range).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                                        ))}
+                                    <div className="w-16 border-l border-[#2a2a2a] bg-[#121212] flex flex-col justify-between py-10 px-1">
+                                        {chartMetrics && [1, 0.75, 0.5, 0.25, 0].map(v => (<span key={v} className="text-[9px] font-bold text-[#848e9c]">{(chartMetrics.min + v * chartMetrics.range).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>))}
                                     </div>
                                 </div>
                             </div>
@@ -236,9 +251,7 @@ export default function ProoBeeDashboard() {
                                 <div className="flex-1 bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col shadow-[4px_4px_0px_0px_#1a1a1a] overflow-hidden">
                                     <div className="p-3 bg-[#FFD700] border-b-2 border-[#1a1a1a] font-black text-xs uppercase flex items-center gap-2"><Radio size={12} /> Live Reasoning</div>
                                     <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#fdfcf0]">
-                                        {reasoningLogs.length > 0 ? reasoningLogs.map((log, i) => (
-                                            <div key={i} className="bg-white p-3 rounded-xl border-2 border-[#1a1a1a] shadow-[2px_2px_0px_0px_#1a1a1a] text-[10px] font-bold italic leading-tight animate-in fade-in slide-in-from-bottom-2">"{log.content}"</div>
-                                        )) : <div className="text-[10px] font-bold opacity-30 text-center py-10 italic">Waiting for bee thoughts...</div>}
+                                        {reasoningLogs.length > 0 ? reasoningLogs.map((log, i) => (<div key={i} className="bg-white p-3 rounded-xl border-2 border-[#1a1a1a] shadow-[2px_2px_0px_0px_#1a1a1a] text-[10px] font-bold italic leading-tight">"{log.content}"</div>)) : <div className="text-[10px] font-bold opacity-30 text-center py-10 italic">Waiting for bee thoughts...</div>}
                                     </div>
                                 </div>
                                 <div className="h-48 bg-white rounded-3xl border-2 border-[#1a1a1a] overflow-hidden shadow-[4px_4px_0px_0px_#1a1a1a] flex flex-col">
@@ -259,10 +272,7 @@ export default function ProoBeeDashboard() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl pb-10">
                             {myAgents.map((agent) => (
                                 <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${agent.status !== 'alive' ? 'opacity-50 grayscale' : ''}`}>
-                                    <div className="flex items-center gap-4">
-                                        <div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'alive' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}><Bot size={20} /></div>
-                                        <div><h3 className="font-black text-lg italic leading-tight uppercase tracking-tighter">{agent.name}</h3><p className="text-[10px] font-black opacity-40 uppercase tracking-tighter">{agent.provider} • Yield: {agent.yield?.toFixed(2) || '0.00'}%</p></div>
-                                    </div>
+                                    <div className="flex items-center gap-4"><div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'alive' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}><Bot size={20} /></div><div><h3 className="font-black text-lg italic leading-tight uppercase tracking-tighter">{agent.name}</h3><p className="text-[10px] font-black opacity-40 uppercase tracking-tighter">{agent.provider} • Yield: {agent.yield?.toFixed(2) || '0.00'}%</p></div></div>
                                     <button onClick={() => toggleAgentStatus(agent.id, agent.status)} className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] active:translate-y-[1px] transition-all ${agent.status === 'alive' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}><Power size={12} strokeWidth={3} />{agent.status === 'alive' ? 'Stop Bee' : 'Start Bee'}</button>
                                 </div>
                             ))}
