@@ -30,8 +30,7 @@ export default function ProoBeeDashboard() {
     const [reasoningLogs, setReasoningLogs] = useState<any[]>([]);
     const [myAgents, setMyAgents] = useState<any[]>([]);
     const [hoverInfo, setHoverInfo] = useState<{ x: number, y: number, price: string, time: string, idx: number } | null>(null);
-    // 마커 호버 전용 상태 추가
-    const [tradeHover, setTradeHover] = useState<{ x: number, y: number, price: string, qty: string, type: 'BUY' | 'SELL' } | null>(null);
+    const [tradeHover, setTradeHover] = useState<{ x: number, y: number, price: string, qty: string, type: 'BUY' | 'SELL', reason: string } | null>(null);
 
     const fetchData = async () => {
         let interval = '1h', limit = '40';
@@ -48,7 +47,7 @@ export default function ProoBeeDashboard() {
                 setActiveAgentsCount(agentData.filter(a => a.status === 'alive').length);
                 setAvgYield(agentData.length > 0 ? agentData.reduce((acc, curr) => acc + (curr.yield || 0), 0) / agentData.length : 0);
             }
-            const { data: logs } = await supabase.from('reasoning_logs').select('*').order('created_at', { ascending: false }).limit(20);
+            const { data: logs } = await supabase.from('reasoning_logs').select('*').order('created_at', { ascending: false }).limit(30);
             setReasoningLogs(logs || []);
         } catch (e) { console.error("Fetch Error:", e); }
     };
@@ -68,37 +67,40 @@ export default function ProoBeeDashboard() {
         return () => { subscription.unsubscribe(); clearInterval(interval); };
     }, [timeFilter]);
 
+    // 오류 수정 포인트: handleAuth 함수 재정의
+    const handleAuth = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const { error } = isSignUp ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
+        if (error) alert(error.message);
+    };
+
     const handleRunSimulation = async (isAuto = false) => {
         const aliveBees = myAgents.filter(a => a.status === 'alive');
         if (aliveBees.length === 0) return;
         setIsSimulating(true);
         const currentPrice = marketData.length > 0 ? parseFloat(marketData[marketData.length - 1][4]) : 0;
+        const reasons = ["RSI is oversold below 30.", "MA Cross detected on 15m.", "Strong support level found.", "Decrease in volatility.", "Bullish divergence on MACD."];
         for (const agent of aliveBees) {
             try {
-                const mockDecisions = ['BUY', 'SELL', 'HOLD'];
-                const decision = mockDecisions[Math.floor(Math.random() * mockDecisions.length)];
-                // 수량 데이터 시뮬레이션 (0.01 ~ 0.1 BTC)
-                const qty = (Math.random() * 0.09 + 0.01).toFixed(4);
-                const mockReasoning = `${agent.name} decided to ${decision} at $${currentPrice.toLocaleString()}. Qty: ${qty} BTC`;
-                const { error: logError } = await supabase.from('reasoning_logs').insert([{ content: mockReasoning, agent_id: agent.id }]);
-                if (!logError) {
-                    const yieldChange = decision === 'BUY' ? 0.2 : (decision === 'SELL' ? -0.1 : 0.01);
-                    await supabase.from('agents').update({ yield: (agent.yield || 0) + yieldChange }).eq('id', agent.id);
+                const decision = ['BUY', 'SELL', 'HOLD'][Math.floor(Math.random() * 3)];
+                const qty = (Math.random() * 0.05 + 0.01).toFixed(4);
+                const reason = reasons[Math.floor(Math.random() * reasons.length)];
+                // 3. 그래프 연동 및 근거 데이터 포함 (형식: [DECISION] $PRICE | Qty: QTY | Reason: REASON)
+                const content = `[${decision}] $${currentPrice.toLocaleString()} | Qty: ${qty} | Reason: ${reason}`;
+                const { error } = await supabase.from('reasoning_logs').insert([{ content, agent_id: agent.id }]);
+                if (!error && decision !== 'HOLD') {
+                    await supabase.from('agents').update({ yield: (agent.yield || 0) + (decision === 'BUY' ? 0.25 : -0.15) }).eq('id', agent.id);
                 }
             } catch (err) { console.error(err); }
         }
-        await fetchData();
-        setIsSimulating(false);
+        await fetchData(); setIsSimulating(false);
     };
 
     const handleCreateAgent = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return alert("Auth required.");
-        const { error: agentError } = await supabase.from('agents').insert([{
-            name: newAgentName, persona: newAgentPrompt, provider: selectedProvider.toLowerCase(),
-            user_id: user.id, yield: 0.0, model: 'Gemini-Flash', api_key: apiKey, status: 'alive'
-        }]);
-        if (!agentError) { setIsCreateModalOpen(false); setNewAgentName(''); setNewAgentPrompt(''); setApiKey(''); fetchData(); }
+        const { error } = await supabase.from('agents').insert([{ name: newAgentName, persona: newAgentPrompt, provider: selectedProvider.toLowerCase(), user_id: user.id, yield: 0.0, model: 'Gemini-Flash', api_key: apiKey, status: 'alive' }]);
+        if (!error) { setIsCreateModalOpen(false); setNewAgentName(''); setNewAgentPrompt(''); setApiKey(''); fetchData(); }
     };
 
     const toggleAgentStatus = async (agentId: string, currentStatus: string | null) => {
@@ -126,12 +128,6 @@ export default function ProoBeeDashboard() {
         setHoverInfo({ x: getX(idx), y: getY(price), price: price.toLocaleString(), time: new Date(marketData[idx][0]).toLocaleString(), idx });
     };
 
-    const handleAuth = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const { error } = isSignUp ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
-        if (error) alert(error.message);
-    };
-
     if (loading) return null;
 
     return (
@@ -142,26 +138,23 @@ export default function ProoBeeDashboard() {
                         <div className="w-20 h-20 bg-[#1a1a1a] text-[#FFD700] rounded-full mx-auto flex items-center justify-center mb-6 border-4 border-white shadow-lg"><Hexagon className="w-10 h-10 fill-current" /></div>
                         <h1 className="text-4xl font-black mb-2 italic tracking-tighter uppercase">Proo bee</h1>
                         <form onSubmit={handleAuth} className="space-y-4 text-left">
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email Address" className="w-full px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
+                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
                             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
-                            <button type="submit" className="w-full bg-[#1a1a1a] text-white py-4 rounded-2xl font-black text-lg shadow-[4px_4px_0px_0px_#1a1a1a] transition-all uppercase">{isSignUp ? 'Create Hive' : 'Connect'}</button>
+                            <button type="submit" className="w-full bg-[#1a1a1a] text-white py-4 rounded-2xl font-black text-lg shadow-[4px_4px_0px_0px_#1a1a1a] transition-all uppercase">Connect Hive</button>
                         </form>
-                        <button onClick={() => setIsSignUp(!isSignUp)} className="mt-6 text-xs font-black uppercase tracking-widest hover:underline opacity-60 underline">Sign Up / Login</button>
+                        <button onClick={() => setIsSignUp(!isSignUp)} className="mt-6 text-xs font-black uppercase tracking-widest hover:underline opacity-60 italic">Toggle Sign Up / Login</button>
                     </div>
                 </div>
             )}
             {isCreateModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1a1a1a]/40 backdrop-blur-sm p-4">
                     <div className="bg-white w-full max-w-lg rounded-[2.5rem] border-4 border-[#1a1a1a] shadow-[8px_8px_0px_0px_#1a1a1a] overflow-hidden">
-                        <div className="p-6 bg-[#FFD700] border-b-4 border-[#1a1a1a] flex justify-between items-center font-black uppercase">Hatch New Bee<button onClick={() => setIsCreateModalOpen(false)}><X size={24} strokeWidth={3} /></button></div>
+                        <div className="p-6 bg-[#FFD700] border-b-4 border-[#1a1a1a] flex justify-between items-center font-black">HATCH NEW BEE<button onClick={() => setIsCreateModalOpen(false)}><X size={24} strokeWidth={3} /></button></div>
                         <form onSubmit={handleCreateAgent} className="p-8 space-y-5">
-                            <input value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)} placeholder="Agent Name" className="w-full px-5 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none" required />
-                            <div className="grid grid-cols-2 gap-4">
-                                <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AIProvider)} className="px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold bg-white cursor-pointer"><option value="Google">Google</option><option value="OpenAI">OpenAI</option></select>
-                                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API Key" className="px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
-                            </div>
-                            <textarea value={newAgentPrompt} onChange={(e) => setNewAgentPrompt(e.target.value)} placeholder="Trading Logic..." className="w-full h-32 px-5 py-4 rounded-2xl border-2 border-[#1a1a1a] font-bold resize-none bg-[#fdfcf0]" required />
-                            <button type="submit" className="w-full py-4 bg-[#1a1a1a] text-white rounded-2xl font-black shadow-[4px_4px_0px_0px_#FFD700] transition-all uppercase">Hatch Agent</button>
+                            <input value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)} placeholder="Agent Name" className="w-full px-5 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
+                            <div className="grid grid-cols-2 gap-4"><select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AIProvider)} className="px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold bg-white"><option value="Google">Google</option><option value="OpenAI">OpenAI</option></select><input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API Key" className="px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required /></div>
+                            <textarea value={newAgentPrompt} onChange={(e) => setNewAgentPrompt(e.target.value)} placeholder="Logic..." className="w-full h-32 px-5 py-4 rounded-2xl border-2 border-[#1a1a1a] font-bold resize-none bg-[#fdfcf0]" required />
+                            <button type="submit" className="w-full py-4 bg-[#1a1a1a] text-white rounded-2xl font-black shadow-[4px_4px_0px_0px_#FFD700] uppercase">Hatch Bee</button>
                         </form>
                     </div>
                 </div>
@@ -184,7 +177,7 @@ export default function ProoBeeDashboard() {
                         </div>
                         <div className="flex-1 flex gap-6 overflow-hidden">
                             <div className="flex-[2.5] bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col shadow-[4px_4px_0px_0px_#1a1a1a] overflow-hidden">
-                                <div className="p-4 border-b-2 border-[#1a1a1a] flex justify-between bg-[#fdfcf0] font-black uppercase text-[10px] tracking-widest items-center">
+                                <div className="p-4 border-b-2 border-[#1a1a1a] flex justify-between bg-[#fdfcf0] font-black uppercase text-[10px] items-center">
                                     <div className="flex items-center gap-4"><span>Market Arena (BTC/USDT)</span><div className="flex border-2 border-[#1a1a1a] rounded overflow-hidden"><button onClick={() => setChartType('line')} className={`p-1 ${chartType === 'line' ? 'bg-[#FFD700]' : 'bg-white'}`}><LineIcon size={12} /></button><button onClick={() => setChartType('candle')} className={`p-1 ${chartType === 'candle' ? 'bg-[#FFD700]' : 'bg-white'}`}><CandlestickIcon size={12} /></button></div></div>
                                     <div className="flex gap-2">{(['1h', '1d', '1w'] as TimeFilter[]).map(f => (<button key={f} onClick={() => setTimeFilter(f)} className={`px-2 py-0.5 rounded border-2 border-[#1a1a1a] ${timeFilter === f ? 'bg-[#FFD700]' : 'bg-white'}`}>{f}</button>))}</div>
                                 </div>
@@ -197,42 +190,31 @@ export default function ProoBeeDashboard() {
                                                 chartType === 'line' ? (<path d={`M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}`} fill="none" stroke="#FFD700" strokeWidth="2" strokeLinecap="round" />) :
                                                     marketData.map((d, i) => {
                                                         const o = parseFloat(d[1]), h = parseFloat(d[2]), l = parseFloat(d[3]), c = parseFloat(d[4]);
-                                                        const isUp = c >= o, x = getX(i), cw = (700 / marketData.length) * 0.4;
+                                                        const isUp = c >= o, x = getX(i), cw = (800 / marketData.length) * 0.4;
                                                         return (<g key={i}><line x1={x} y1={getY(h)} x2={x} y2={getY(l)} stroke={isUp ? '#2ebd85' : '#f6465d'} strokeWidth="1.5" /><rect x={x - cw / 2} y={getY(isUp ? c : o)} width={cw} height={Math.max(1, Math.abs(getY(c) - getY(o)))} fill={isUp ? '#2ebd85' : '#f6465d'} rx="1" /></g>);
                                                     })
                                             )}
-                                            {/* Trade Markers with Hover logic */}
+                                            {/* 마커 연동 강화: 로그 파싱 후 차트에 표시 */}
                                             {reasoningLogs.map((log, i) => {
                                                 const logTime = new Date(log.created_at).getTime();
-                                                const dataIdx = marketData.findIndex(d => Math.abs(d[0] - logTime) < 3600000);
-                                                if (dataIdx === -1) return null;
-                                                const isBuy = log.content.includes('BUY');
-                                                const isSell = log.content.includes('SELL');
+                                                const isBuy = log.content.includes('[BUY]'); const isSell = log.content.includes('[SELL]');
                                                 if (!isBuy && !isSell) return null;
-                                                const price = log.content.match(/\$(\d+,?\d+)/)?.[1] || marketData[dataIdx][4];
-                                                const qty = log.content.match(/Qty: ([\d.]+)/)?.[1] || "0.05";
+                                                const dataIdx = marketData.findIndex(d => Math.abs(d[0] - logTime) < 600000);
+                                                if (dataIdx === -1) return null;
                                                 const x = getX(dataIdx); const y = getY(parseFloat(marketData[dataIdx][4]));
                                                 return (
-                                                    <g key={i} onMouseEnter={() => setTradeHover({ x, y, price, qty, type: isBuy ? 'BUY' : 'SELL' })} onMouseLeave={() => setTradeHover(null)}>
+                                                    <g key={i} onMouseEnter={() => setTradeHover({ x, y, price: log.content.match(/\$(\d+,?\d+)/)?.[1] || "0", qty: log.content.match(/Qty: ([\d.]+)/)?.[1] || "0", type: isBuy ? 'BUY' : 'SELL', reason: log.content.split('Reason: ')[1] || "Analyzed trend." })} onMouseLeave={() => setTradeHover(null)}>
                                                         <circle cx={x} cy={y} r="8" fill={isBuy ? '#2ebd85' : '#f6465d'} stroke="white" strokeWidth="2" className="cursor-pointer hover:scale-125 transition-transform" />
                                                         <text x={x} y={y + (isBuy ? 22 : -14)} textAnchor="middle" className={`text-[10px] font-black ${isBuy ? 'fill-[#2ebd85]' : 'fill-[#f6465d]'}`}>{isBuy ? '▲ BUY' : '▼ SELL'}</text>
                                                     </g>
                                                 );
                                             })}
-                                            {/* Trade Tooltip (Hover on Bee Marker) */}
                                             {tradeHover && (
                                                 <g>
-                                                    <rect x={tradeHover.x + 10} y={tradeHover.y - 35} width="100" height="45" fill="white" stroke={tradeHover.type === 'BUY' ? '#2ebd85' : '#f6465d'} strokeWidth="3" rx="8" />
-                                                    <text x={tradeHover.x + 20} y={tradeHover.y - 20} className="text-[10px] font-black fill-[#1a1a1a]">PRICE: ${tradeHover.price}</text>
-                                                    <text x={tradeHover.x + 20} y={tradeHover.y - 5} className="text-[10px] font-black fill-[#1a1a1a]">QTY: {tradeHover.qty} BTC</text>
-                                                </g>
-                                            )}
-                                            {/* Standard Crosshair Tooltip */}
-                                            {hoverInfo && !tradeHover && (
-                                                <g>
-                                                    <line x1="0" y1={hoverInfo.y} x2="900" y2={hoverInfo.y} stroke="white" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
-                                                    <line x1={hoverInfo.x} y1="0" x2={hoverInfo.x} y2="300" stroke="white" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
-                                                    <rect x="835" y={hoverInfo.y - 10} width="65" height="20" fill="#FFD700" rx="4" /><text x="867" y={hoverInfo.y + 4} textAnchor="middle" className="text-[10px] fill-[#1a1a1a] font-black">${hoverInfo.price.split('.')[0]}</text>
+                                                    <rect x={tradeHover.x + 10} y={tradeHover.y - 60} width="160" height="70" fill="white" stroke={tradeHover.type === 'BUY' ? '#2ebd85' : '#f6465d'} strokeWidth="3" rx="8" />
+                                                    <text x={tradeHover.x + 20} y={tradeHover.y - 42} className="text-[10px] font-black fill-[#1a1a1a]">PRICE: ${tradeHover.price}</text>
+                                                    <text x={tradeHover.x + 20} y={tradeHover.y - 27} className="text-[10px] font-black fill-[#1a1a1a]">QTY: {tradeHover.qty} BTC</text>
+                                                    <text x={tradeHover.x + 20} y={tradeHover.y - 12} className="text-[9px] font-bold fill-[#1a1a1a] opacity-60 uppercase">REASON: {tradeHover.reason}</text>
                                                 </g>
                                             )}
                                         </svg>
@@ -246,10 +228,15 @@ export default function ProoBeeDashboard() {
                                 <div className="flex-1 bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col shadow-[4px_4px_0px_0px_#1a1a1a] overflow-hidden">
                                     <div className="p-3 bg-[#FFD700] border-b-2 border-[#1a1a1a] font-black text-xs uppercase flex items-center gap-2"><Radio size={12} /> Live Reasoning</div>
                                     <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#fdfcf0]">
-                                        {reasoningLogs.length > 0 ? reasoningLogs.map((log, i) => (<div key={i} className="bg-white p-3 rounded-xl border-2 border-[#1a1a1a] shadow-[2px_2px_0px_0px_#1a1a1a] text-[10px] font-bold italic leading-tight">"{log.content}"</div>)) : <div className="text-[10px] font-bold opacity-30 text-center py-10 italic">Waiting for bee thoughts...</div>}
+                                        {reasoningLogs.length > 0 ? reasoningLogs.map((log, i) => (
+                                            <div key={i} className="bg-white p-3 rounded-xl border-2 border-[#1a1a1a] shadow-[2px_2px_0px_0px_#1a1a1a] space-y-1 animate-in fade-in slide-in-from-bottom-2">
+                                                <div className="text-[10px] font-bold italic leading-tight">"{log.content}"</div>
+                                                <div className="text-[8px] font-black opacity-40 text-right uppercase tracking-tighter">{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+                                            </div>
+                                        )) : <div className="text-[10px] font-bold opacity-30 text-center py-10 italic">Waiting for bee thoughts...</div>}
                                     </div>
                                 </div>
-                                <div className="h-48 bg-white rounded-3xl border-2 border-[#1a1a1a] overflow-hidden shadow-[4px_4px_0px_0px_#1a1a1a] flex flex-col">
+                                <div className="h-40 bg-white rounded-3xl border-2 border-[#1a1a1a] overflow-hidden shadow-[4px_4px_0px_0px_#1a1a1a] flex flex-col">
                                     <div className="p-3 bg-[#FFD700] border-b-2 border-[#1a1a1a] font-black text-xs uppercase flex items-center gap-2"><Trophy size={12} /> Leaderboard</div>
                                     <div className="flex-1 overflow-y-auto p-2"><table className="w-full text-[10px] font-black"><tbody>{myAgents.slice(0, 5).map((a, i) => (<tr key={i} className="border-b border-[#1a1a1a]/5"><td className="p-2 italic">{i + 1}. {a.name}</td><td className="p-2 text-right text-green-600">+{a.yield?.toFixed(2)}%</td></tr>))}</tbody></table></div>
                                 </div>
@@ -263,14 +250,7 @@ export default function ProoBeeDashboard() {
                             <h2 className="text-3xl font-black italic mb-2 uppercase tracking-tighter leading-none">My Agent Console</h2>
                             <button onClick={() => setIsCreateModalOpen(true)} className="px-10 py-4 bg-[#1a1a1a] text-white rounded-2xl font-black shadow-[4px_4px_0px_0px_#FFD700] hover:scale-105 transition-transform uppercase text-sm">Hatch New Bee Agent</button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl">
-                            {myAgents.map((agent) => (
-                                <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${agent.status !== 'alive' ? 'opacity-50 grayscale' : ''}`}>
-                                    <div className="flex items-center gap-4"><div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'alive' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}><Bot size={20} /></div><div><h3 className="font-black text-lg italic leading-tight uppercase tracking-tighter">{agent.name}</h3><p className="text-[10px] font-black opacity-40 uppercase tracking-tighter">{agent.provider} • Yield: {agent.yield?.toFixed(2) || '0.00'}%</p></div></div>
-                                    <button onClick={() => toggleAgentStatus(agent.id, agent.status)} className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] active:translate-y-[1px] transition-all ${agent.status === 'alive' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}><Power size={12} strokeWidth={3} />{agent.status === 'alive' ? 'Stop Bee' : 'Start Bee'}</button>
-                                </div>
-                            ))}
-                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl">{myAgents.map((agent) => (<div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${agent.status !== 'alive' ? 'opacity-50 grayscale' : ''}`}><div className="flex items-center gap-4"><div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'alive' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}><Bot size={20} /></div><div><h3 className="font-black text-lg italic leading-tight uppercase tracking-tighter">{agent.name}</h3><p className="text-[10px] font-black opacity-40 uppercase tracking-tighter">{agent.provider} • Yield: {agent.yield?.toFixed(2) || '0.00'}%</p></div></div><button onClick={() => toggleAgentStatus(agent.id, agent.status)} className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#1a1a1a] font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_#1a1a1a] active:translate-y-[1px] transition-all ${agent.status === 'alive' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}><Power size={12} strokeWidth={3} />{agent.status === 'alive' ? 'Stop Bee' : 'Start Bee'}</button></div>))}</div>
                     </div>
                 )}
             </main>
