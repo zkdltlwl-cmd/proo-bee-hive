@@ -29,8 +29,9 @@ export default function ProoBeeDashboard() {
     const [avgYield, setAvgYield] = useState<number>(0);
     const [reasoningLogs, setReasoningLogs] = useState<any[]>([]);
     const [myAgents, setMyAgents] = useState<any[]>([]);
-    // 마우스 호버 상태 추가
     const [hoverInfo, setHoverInfo] = useState<{ x: number, y: number, price: string, time: string, idx: number } | null>(null);
+    // 마커 호버 전용 상태 추가
+    const [tradeHover, setTradeHover] = useState<{ x: number, y: number, price: string, qty: string, type: 'BUY' | 'SELL' } | null>(null);
 
     const fetchData = async () => {
         let interval = '1h', limit = '40';
@@ -67,25 +68,18 @@ export default function ProoBeeDashboard() {
         return () => { subscription.unsubscribe(); clearInterval(interval); };
     }, [timeFilter]);
 
-    useEffect(() => {
-        if (!user) return;
-        const simInterval = setInterval(() => {
-            const aliveExists = myAgents.some(a => a.status === 'alive');
-            if (aliveExists && !isSimulating) { handleRunSimulation(true); }
-        }, 60000);
-        return () => clearInterval(simInterval);
-    }, [myAgents, user, isSimulating]);
-
     const handleRunSimulation = async (isAuto = false) => {
         const aliveBees = myAgents.filter(a => a.status === 'alive');
-        if (aliveBees.length === 0) { if (!isAuto) alert("No active agents."); return; }
+        if (aliveBees.length === 0) return;
         setIsSimulating(true);
         const currentPrice = marketData.length > 0 ? parseFloat(marketData[marketData.length - 1][4]) : 0;
         for (const agent of aliveBees) {
             try {
                 const mockDecisions = ['BUY', 'SELL', 'HOLD'];
                 const decision = mockDecisions[Math.floor(Math.random() * mockDecisions.length)];
-                const mockReasoning = `${agent.name} decided to ${decision} at $${currentPrice.toLocaleString()}.`;
+                // 수량 데이터 시뮬레이션 (0.01 ~ 0.1 BTC)
+                const qty = (Math.random() * 0.09 + 0.01).toFixed(4);
+                const mockReasoning = `${agent.name} decided to ${decision} at $${currentPrice.toLocaleString()}. Qty: ${qty} BTC`;
                 const { error: logError } = await supabase.from('reasoning_logs').insert([{ content: mockReasoning, agent_id: agent.id }]);
                 if (!logError) {
                     const yieldChange = decision === 'BUY' ? 0.2 : (decision === 'SELL' ? -0.1 : 0.01);
@@ -102,10 +96,9 @@ export default function ProoBeeDashboard() {
         if (!user) return alert("Auth required.");
         const { error: agentError } = await supabase.from('agents').insert([{
             name: newAgentName, persona: newAgentPrompt, provider: selectedProvider.toLowerCase(),
-            user_id: user.id, yield: 0.0, model: selectedProvider === 'Google' ? 'gemini-1.5-flash' : 'Selected', api_key: apiKey, status: 'alive'
+            user_id: user.id, yield: 0.0, model: 'Gemini-Flash', api_key: apiKey, status: 'alive'
         }]);
-        if (agentError) alert(agentError.message);
-        else { setIsCreateModalOpen(false); setNewAgentName(''); setNewAgentPrompt(''); setApiKey(''); fetchData(); }
+        if (!agentError) { setIsCreateModalOpen(false); setNewAgentName(''); setNewAgentPrompt(''); setApiKey(''); fetchData(); }
     };
 
     const toggleAgentStatus = async (agentId: string, currentStatus: string | null) => {
@@ -124,15 +117,13 @@ export default function ProoBeeDashboard() {
     const getY = (p: number) => chartMetrics ? 260 - ((p - chartMetrics.min) / chartMetrics.range) * 220 : 0;
     const getX = (i: number) => 40 + (i / (marketData.length - 1)) * 820;
 
-    // 마우스 이벤트 핸들러
     const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
         if (!chartMetrics || marketData.length === 0) return;
         const rect = e.currentTarget.getBoundingClientRect();
         const mouseX = ((e.clientX - rect.left) / rect.width) * 900;
         const idx = Math.min(Math.max(0, Math.round(((mouseX - 40) / 820) * (marketData.length - 1))), marketData.length - 1);
         const price = parseFloat(marketData[idx][4]);
-        const time = new Date(marketData[idx][0]).toLocaleString();
-        setHoverInfo({ x: getX(idx), y: getY(price), price: price.toLocaleString(), time, idx });
+        setHoverInfo({ x: getX(idx), y: getY(price), price: price.toLocaleString(), time: new Date(marketData[idx][0]).toLocaleString(), idx });
     };
 
     const handleAuth = async (e: React.FormEvent) => {
@@ -141,7 +132,6 @@ export default function ProoBeeDashboard() {
         if (error) alert(error.message);
     };
 
-    const handleLogout = () => supabase.auth.signOut();
     if (loading) return null;
 
     return (
@@ -154,23 +144,23 @@ export default function ProoBeeDashboard() {
                         <form onSubmit={handleAuth} className="space-y-4 text-left">
                             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email Address" className="w-full px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
                             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
-                            <button type="submit" className="w-full bg-[#1a1a1a] text-white py-4 rounded-2xl font-black text-lg shadow-[4px_4px_0px_0px_#1a1a1a] active:translate-x-[2px] active:translate-y-[2px] transition-all uppercase">{isSignUp ? 'Create Account' : 'Connect Hive'}</button>
+                            <button type="submit" className="w-full bg-[#1a1a1a] text-white py-4 rounded-2xl font-black text-lg shadow-[4px_4px_0px_0px_#1a1a1a] transition-all uppercase">{isSignUp ? 'Create Hive' : 'Connect'}</button>
                         </form>
-                        <button onClick={() => setIsSignUp(!isSignUp)} className="mt-6 text-xs font-black uppercase tracking-widest hover:underline opacity-60">{isSignUp ? 'Already a bee? Log In' : 'New here? Sign Up'}</button>
+                        <button onClick={() => setIsSignUp(!isSignUp)} className="mt-6 text-xs font-black uppercase tracking-widest hover:underline opacity-60 underline">Sign Up / Login</button>
                     </div>
                 </div>
             )}
             {isCreateModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1a1a1a]/40 backdrop-blur-sm p-4">
                     <div className="bg-white w-full max-w-lg rounded-[2.5rem] border-4 border-[#1a1a1a] shadow-[8px_8px_0px_0px_#1a1a1a] overflow-hidden">
-                        <div className="p-6 bg-[#FFD700] border-b-4 border-[#1a1a1a] flex justify-between items-center font-black uppercase tracking-tighter">Hatch New Bee<button onClick={() => setIsCreateModalOpen(false)}><X size={24} strokeWidth={3} /></button></div>
+                        <div className="p-6 bg-[#FFD700] border-b-4 border-[#1a1a1a] flex justify-between items-center font-black uppercase">Hatch New Bee<button onClick={() => setIsCreateModalOpen(false)}><X size={24} strokeWidth={3} /></button></div>
                         <form onSubmit={handleCreateAgent} className="p-8 space-y-5">
-                            <input value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)} placeholder="Agent Name" className="w-full px-5 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
+                            <input value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)} placeholder="Agent Name" className="w-full px-5 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold outline-none" required />
                             <div className="grid grid-cols-2 gap-4">
-                                <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AIProvider)} className="px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold bg-white outline-none cursor-pointer"><option value="Google">Google</option><option value="OpenAI">OpenAI</option></select>
+                                <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as AIProvider)} className="px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold bg-white cursor-pointer"><option value="Google">Google</option><option value="OpenAI">OpenAI</option></select>
                                 <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API Key" className="px-4 py-3 rounded-2xl border-2 border-[#1a1a1a] font-bold" required />
                             </div>
-                            <textarea value={newAgentPrompt} onChange={(e) => setNewAgentPrompt(e.target.value)} placeholder="Behavior..." className="w-full h-32 px-5 py-4 rounded-2xl border-2 border-[#1a1a1a] font-bold resize-none bg-[#fdfcf0]" required />
+                            <textarea value={newAgentPrompt} onChange={(e) => setNewAgentPrompt(e.target.value)} placeholder="Trading Logic..." className="w-full h-32 px-5 py-4 rounded-2xl border-2 border-[#1a1a1a] font-bold resize-none bg-[#fdfcf0]" required />
                             <button type="submit" className="w-full py-4 bg-[#1a1a1a] text-white rounded-2xl font-black shadow-[4px_4px_0px_0px_#FFD700] transition-all uppercase">Hatch Agent</button>
                         </form>
                     </div>
@@ -179,9 +169,9 @@ export default function ProoBeeDashboard() {
             <header className="h-20 bg-white border-b-4 border-[#1a1a1a] flex items-center justify-between px-8 shrink-0">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentMode('overview')}><div className="w-10 h-10 bg-[#1a1a1a] text-[#FFD700] rounded-full border-2 border-[#1a1a1a] flex items-center justify-center shadow-[2px_2px_0px_0px_#1a1a1a]"><Hexagon className="w-6 h-6 fill-current" /></div><span className="text-2xl font-black italic tracking-tighter uppercase">Proo bee</span></div>
                 <div className="flex items-center gap-4">
-                    <button onClick={() => handleRunSimulation(false)} disabled={isSimulating} className="px-6 py-2 bg-[#1a1a1a] text-[#FFD700] rounded-xl font-black text-sm shadow-[4px_4px_0px_0px_#FFD700] flex items-center gap-2 active:translate-y-1 transition-all disabled:opacity-50"><Play size={16} fill="currentColor" /> {isSimulating ? 'ANALYZING...' : 'RUN SIMULATION'}</button>
-                    <button onClick={() => setCurrentMode(currentMode === 'overview' ? 'agent-detail' : 'overview')} className="px-6 py-2 rounded-xl border-2 border-[#1a1a1a] font-black shadow-[4px_4px_0px_0px_#1a1a1a] flex items-center gap-2 bg-[#FFD700] tracking-wider text-xs uppercase">{currentMode === 'overview' ? 'My Agent' : 'Back Home'}</button>
-                    <div onClick={handleLogout} className="w-10 h-10 rounded-full bg-white border-2 border-[#1a1a1a] flex items-center justify-center cursor-pointer hover:bg-red-50"><LogOut size={18} /></div>
+                    <button onClick={() => handleRunSimulation(false)} disabled={isSimulating} className="px-6 py-2 bg-[#1a1a1a] text-[#FFD700] rounded-xl font-black text-sm shadow-[4px_4px_0px_0px_#FFD700] flex items-center gap-2 transition-all disabled:opacity-50"><Play size={16} fill="currentColor" /> {isSimulating ? 'ANALYZING...' : 'RUN SIMULATION'}</button>
+                    <button onClick={() => setCurrentMode(currentMode === 'overview' ? 'agent-detail' : 'overview')} className="px-6 py-2 rounded-xl border-2 border-[#1a1a1a] font-black shadow-[4px_4px_0px_0px_#1a1a1a] flex items-center gap-2 bg-[#FFD700] text-xs uppercase">{currentMode === 'overview' ? 'My Agent' : 'Back Home'}</button>
+                    <div onClick={() => supabase.auth.signOut()} className="w-10 h-10 rounded-full bg-white border-2 border-[#1a1a1a] flex items-center justify-center cursor-pointer hover:bg-red-50 shadow-[2px_2px_0px_0px_#1a1a1a]"><LogOut size={18} /></div>
                 </div>
             </header>
             <main className="flex-1 p-6 overflow-hidden">
@@ -194,50 +184,55 @@ export default function ProoBeeDashboard() {
                         </div>
                         <div className="flex-1 flex gap-6 overflow-hidden">
                             <div className="flex-[2.5] bg-white rounded-3xl border-2 border-[#1a1a1a] flex flex-col shadow-[4px_4px_0px_0px_#1a1a1a] overflow-hidden">
-                                <div className="p-4 border-b-2 border-[#1a1a1a] flex justify-between bg-[#fdfcf0] font-black uppercase text-[10px] tracking-widest">
+                                <div className="p-4 border-b-2 border-[#1a1a1a] flex justify-between bg-[#fdfcf0] font-black uppercase text-[10px] tracking-widest items-center">
                                     <div className="flex items-center gap-4"><span>Market Arena (BTC/USDT)</span><div className="flex border-2 border-[#1a1a1a] rounded overflow-hidden"><button onClick={() => setChartType('line')} className={`p-1 ${chartType === 'line' ? 'bg-[#FFD700]' : 'bg-white'}`}><LineIcon size={12} /></button><button onClick={() => setChartType('candle')} className={`p-1 ${chartType === 'candle' ? 'bg-[#FFD700]' : 'bg-white'}`}><CandlestickIcon size={12} /></button></div></div>
                                     <div className="flex gap-2">{(['1h', '1d', '1w'] as TimeFilter[]).map(f => (<button key={f} onClick={() => setTimeFilter(f)} className={`px-2 py-0.5 rounded border-2 border-[#1a1a1a] ${timeFilter === f ? 'bg-[#FFD700]' : 'bg-white'}`}>{f}</button>))}</div>
                                 </div>
                                 <div className="flex-1 bg-[#121212] relative flex overflow-hidden cursor-crosshair">
                                     <div className="flex-1 relative">
                                         <svg className="w-full h-full" viewBox="0 0 900 300" preserveAspectRatio="none" onMouseMove={handleMouseMove} onMouseLeave={() => setHoverInfo(null)}>
-                                            {/* Grid Lines */}
                                             {[0, 0.25, 0.5, 0.75, 1].map(v => (<line key={v} x1="0" y1={40 + v * 220} x2="900" y2={40 + v * 220} stroke="#2a2a2a" strokeWidth="1" strokeDasharray="4" />))}
-                                            {/* X-axis time labels */}
                                             {marketData.length > 0 && [0, Math.floor(marketData.length / 2), marketData.length - 1].map(i => (<text key={i} x={getX(i)} y="295" className="text-[12px] fill-[#848e9c] font-bold" textAnchor="middle">{new Date(marketData[i][0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>))}
-                                            {/* Chart Rendering */}
                                             {chartMetrics && marketData.length > 0 && (
                                                 chartType === 'line' ? (<path d={`M ${marketData.map((_, i) => `${getX(i)} ${getY(parseFloat(marketData[i][4]))}`).join(' L ')}`} fill="none" stroke="#FFD700" strokeWidth="2" strokeLinecap="round" />) :
                                                     marketData.map((d, i) => {
                                                         const o = parseFloat(d[1]), h = parseFloat(d[2]), l = parseFloat(d[3]), c = parseFloat(d[4]);
-                                                        const isUp = c >= o, x = getX(i), cw = (800 / marketData.length) * 0.4;
+                                                        const isUp = c >= o, x = getX(i), cw = (700 / marketData.length) * 0.4;
                                                         return (<g key={i}><line x1={x} y1={getY(h)} x2={x} y2={getY(l)} stroke={isUp ? '#2ebd85' : '#f6465d'} strokeWidth="1.5" /><rect x={x - cw / 2} y={getY(isUp ? c : o)} width={cw} height={Math.max(1, Math.abs(getY(c) - getY(o)))} fill={isUp ? '#2ebd85' : '#f6465d'} rx="1" /></g>);
                                                     })
                                             )}
-                                            {/* Agent Buy/Sell Markers (based on Reasoning Logs) */}
+                                            {/* Trade Markers with Hover logic */}
                                             {reasoningLogs.map((log, i) => {
                                                 const logTime = new Date(log.created_at).getTime();
-                                                const dataIdx = marketData.findIndex(d => Math.abs(d[0] - logTime) < 3600000); // 1시간 이내 오차 매칭
+                                                const dataIdx = marketData.findIndex(d => Math.abs(d[0] - logTime) < 3600000);
                                                 if (dataIdx === -1) return null;
                                                 const isBuy = log.content.includes('BUY');
                                                 const isSell = log.content.includes('SELL');
                                                 if (!isBuy && !isSell) return null;
+                                                const price = log.content.match(/\$(\d+,?\d+)/)?.[1] || marketData[dataIdx][4];
+                                                const qty = log.content.match(/Qty: ([\d.]+)/)?.[1] || "0.05";
+                                                const x = getX(dataIdx); const y = getY(parseFloat(marketData[dataIdx][4]));
                                                 return (
-                                                    <g key={i}>
-                                                        <circle cx={getX(dataIdx)} cy={getY(parseFloat(marketData[dataIdx][4]))} r="6" fill={isBuy ? '#2ebd85' : '#f6465d'} stroke="white" strokeWidth="2" />
-                                                        <text x={getX(dataIdx)} y={getY(parseFloat(marketData[dataIdx][4])) + (isBuy ? 20 : -15)} textAnchor="middle" className={`text-[10px] font-black ${isBuy ? 'fill-[#2ebd85]' : 'fill-[#f6465d]'}`}>{isBuy ? '▲ BUY' : '▼ SELL'}</text>
+                                                    <g key={i} onMouseEnter={() => setTradeHover({ x, y, price, qty, type: isBuy ? 'BUY' : 'SELL' })} onMouseLeave={() => setTradeHover(null)}>
+                                                        <circle cx={x} cy={y} r="8" fill={isBuy ? '#2ebd85' : '#f6465d'} stroke="white" strokeWidth="2" className="cursor-pointer hover:scale-125 transition-transform" />
+                                                        <text x={x} y={y + (isBuy ? 22 : -14)} textAnchor="middle" className={`text-[10px] font-black ${isBuy ? 'fill-[#2ebd85]' : 'fill-[#f6465d]'}`}>{isBuy ? '▲ BUY' : '▼ SELL'}</text>
                                                     </g>
                                                 );
                                             })}
-                                            {/* Crosshair & Tooltip */}
-                                            {hoverInfo && (
+                                            {/* Trade Tooltip (Hover on Bee Marker) */}
+                                            {tradeHover && (
+                                                <g>
+                                                    <rect x={tradeHover.x + 10} y={tradeHover.y - 35} width="100" height="45" fill="white" stroke={tradeHover.type === 'BUY' ? '#2ebd85' : '#f6465d'} strokeWidth="3" rx="8" />
+                                                    <text x={tradeHover.x + 20} y={tradeHover.y - 20} className="text-[10px] font-black fill-[#1a1a1a]">PRICE: ${tradeHover.price}</text>
+                                                    <text x={tradeHover.x + 20} y={tradeHover.y - 5} className="text-[10px] font-black fill-[#1a1a1a]">QTY: {tradeHover.qty} BTC</text>
+                                                </g>
+                                            )}
+                                            {/* Standard Crosshair Tooltip */}
+                                            {hoverInfo && !tradeHover && (
                                                 <g>
                                                     <line x1="0" y1={hoverInfo.y} x2="900" y2={hoverInfo.y} stroke="white" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
                                                     <line x1={hoverInfo.x} y1="0" x2={hoverInfo.x} y2="300" stroke="white" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
-                                                    <rect x="830" y={hoverInfo.y - 10} width="70" height="20" fill="#FFD700" rx="4" />
-                                                    <text x="865" y={hoverInfo.y + 4} textAnchor="middle" className="text-[10px] fill-[#1a1a1a] font-black">${hoverInfo.price.split('.')[0]}</text>
-                                                    <rect x={hoverInfo.x - 40} y="275" width="80" height="20" fill="#FFD700" rx="4" />
-                                                    <text x={hoverInfo.x} y="289" textAnchor="middle" className="text-[10px] fill-[#1a1a1a] font-black">{new Date(marketData[hoverInfo.idx][0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>
+                                                    <rect x="835" y={hoverInfo.y - 10} width="65" height="20" fill="#FFD700" rx="4" /><text x="867" y={hoverInfo.y + 4} textAnchor="middle" className="text-[10px] fill-[#1a1a1a] font-black">${hoverInfo.price.split('.')[0]}</text>
                                                 </g>
                                             )}
                                         </svg>
@@ -262,14 +257,13 @@ export default function ProoBeeDashboard() {
                         </div>
                     </div>
                 ) : (
-                    <div className="h-full flex flex-col items-center gap-6 overflow-y-auto p-4">
+                    <div className="h-full flex flex-col items-center gap-6 overflow-y-auto p-4 pb-20">
                         <div className="bg-white p-8 rounded-[3rem] border-4 border-[#1a1a1a] shadow-[8px_8px_0px_0px_#1a1a1a] text-center max-w-2xl w-full">
                             <div className="w-20 h-20 bg-[#FFD700] border-4 border-[#1a1a1a] rounded-full mx-auto flex items-center justify-center mb-4 shadow-[4px_4px_0px_0px_#1a1a1a]"><Bot size={40} /></div>
                             <h2 className="text-3xl font-black italic mb-2 uppercase tracking-tighter leading-none">My Agent Console</h2>
-                            <p className="text-xs font-bold opacity-40 uppercase tracking-widest mb-6">Manage Hive Status and Behaviors</p>
                             <button onClick={() => setIsCreateModalOpen(true)} className="px-10 py-4 bg-[#1a1a1a] text-white rounded-2xl font-black shadow-[4px_4px_0px_0px_#FFD700] hover:scale-105 transition-transform uppercase text-sm">Hatch New Bee Agent</button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl pb-10">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl">
                             {myAgents.map((agent) => (
                                 <div key={agent.id} className={`bg-white p-6 rounded-[2rem] border-4 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] flex justify-between items-center transition-all ${agent.status !== 'alive' ? 'opacity-50 grayscale' : ''}`}>
                                     <div className="flex items-center gap-4"><div className={`p-3 rounded-full border-2 border-[#1a1a1a] ${agent.status === 'alive' ? 'bg-[#FFD700]' : 'bg-gray-200'}`}><Bot size={20} /></div><div><h3 className="font-black text-lg italic leading-tight uppercase tracking-tighter">{agent.name}</h3><p className="text-[10px] font-black opacity-40 uppercase tracking-tighter">{agent.provider} • Yield: {agent.yield?.toFixed(2) || '0.00'}%</p></div></div>
